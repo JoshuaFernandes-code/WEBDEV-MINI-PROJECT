@@ -1,24 +1,27 @@
 <?php
-session_start();
-
+// Error reporting for debug
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
+session_start();
 
-$host = 'localhost';
+// Database config (matches your Workbench: 127.0.0.1:3306, root user)
+$host = '127.0.0.1';
 $db   = 'casa_de_fernandes';
 $user = 'root';
 $pass = '';
 $charset = 'utf8mb4';
 $table = 'bookings';
 
+// Clean input
 function clean($v) {
     return htmlspecialchars(trim($v ?? ''), ENT_QUOTES, 'UTF-8');
 }
 
+// Simple HTML fallback
 function html_header($title) {
     echo "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>
-    <title>$title - Casa de Fernandes</title>
+    <title>$title - Booking</title>
     <meta name='viewport' content='width=device-width,initial-scale=1'>
     <style>body {font-family:Lato,Arial,sans-serif; background:#f8f6f2; color:#534832; margin: 3em; text-align:center;}</style>
     </head><body>";
@@ -40,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $special = clean($_POST['specialRequests']);
 
+    // Validation
     if (strlen($name) < 2) $errors[] = "Please enter your full name.";
     if (!preg_match('/^\d{10}$/', $phone)) $errors[] = "Please enter a valid 10-digit phone number.";
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = "Please enter a valid email address.";
@@ -51,19 +55,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (count($errors) === 0) {
         try {
-            $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
+            $dsn = "mysql:host=$host;port=3306;dbname=$db;charset=$charset";
             $pdo = new PDO($dsn, $user, $pass, [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES => false,
             ]);
 
-            $sql = "INSERT INTO $table (name, phone, email, checkin, checkout, guests, room_type, services, special, created)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
-            $stmt = $pdo->prepare($sql);
+            $query = "INSERT INTO $table (name, phone, email, checkin, checkout, guests, room_type, services, special, created)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+            $stmt = $pdo->prepare($query);
             $success = $stmt->execute([$name, $phone, $email, $checkin, $checkout, $guests, $roomType, $services, $special]);
 
-            if ($success) {
+            if (!$success) {
+                $errorInfo = $stmt->errorInfo();
+                $errors[] = "SQL Insert failed: " . htmlspecialchars($errorInfo[2]);
+            }
+
+            if ($success && count($errors) === 0) {
                 $_SESSION['booking_submitted'] = true;
                 $_SESSION['booking_data'] = [
                     'name' => $name,
@@ -78,6 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'timestamp' => date('Y-m-d H:i:s'),
                 ];
 
+                // AJAX response
                 if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'fetch') {
                     header('Content-Type: application/json');
                     echo json_encode(["success" => true, "msg" => "Booking successfully submitted!"]);
@@ -86,22 +96,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     html_header("Booking Successful");
                     echo "<h2>Thank you, " . htmlspecialchars($name) . "!</h2>";
                     echo "<p>Your booking was received successfully.</p>";
-                    echo "<p>We have your check-in date as " . htmlspecialchars($checkin) . ".</p>";
                     echo "<a href='index.html' style='color:#7b8466;'>Back to Home</a>";
                     echo "</body></html>";
                     exit;
                 }
-            } else {
-                $errors[] = "Failed to save your booking, please try again.";
             }
         } catch (PDOException $e) {
-            error_log("DB Error at booking.php: " . $e->getMessage());
-            $errors[] = "A server error occurred. Please try again later.";
+            $errors[] = "Database error: " . htmlspecialchars($e->getMessage());
         }
     }
 
+    // Error feedback
     if (count($errors) > 0) {
-        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH'])=='fetch') {
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'fetch') {
             header('Content-Type: application/json');
             echo json_encode(["success" => false, "msg" => implode("<br>", $errors)]);
             exit;
@@ -120,3 +127,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 ?>
+
